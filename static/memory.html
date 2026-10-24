@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory Management</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="hero">
+  <div>
+    <span class="eyebrow">OPERATING SYSTEMS • MEMORY MANAGEMENT</span>
+    <h1>Memory <span>Allocation</span></h1>
+    <p>Blocks hold question papers, answer sheets and evaluation data. Pick a strategy and see which block each process lands in.</p>
+  </div>
+  <div class="hero-badge">FIT<b>SIM</b></div>
+</header>
+<main>
+  <section class="panel">
+    <div class="section-title"><div><span class="eyebrow">INPUT</span><h2>Configure memory</h2></div></div>
+    <div class="field-row">
+      <label>Block sizes (comma-separated)<input id="blocks" value="100, 500, 200, 300, 600"></label>
+      <label>Process sizes (comma-separated)<input id="processes" value="212, 417, 112, 426"></label>
+      <label>Strategy<select id="method"><option value="first">First Fit</option><option value="best">Best Fit</option><option value="worst">Worst Fit</option></select></label>
+    </div>
+    <div class="actions"><button id="sample" class="secondary">Load sample</button><button id="run" class="run">Allocate memory</button></div>
+    <div id="output" class="result"></div>
+  </section>
+  <section class="panel">
+    <div class="section-title"><div><span class="eyebrow">CONCEPT</span><h2>The three strategies</h2></div></div>
+    <p><b>First Fit</b> uses the first block that is big enough. <b>Best Fit</b> uses the smallest block that is big enough. <b>Worst Fit</b> uses the largest block. Space left inside blocks is too fragmented to use for one large request, even when the total looks big enough.</p>
+  </section>
+</main>
+<footer>Memory Management | First / Best / Worst Fit</footer>
+<script src="/static/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const NAMES = {first: "First Fit", best: "Best Fit", worst: "Worst Fit"};
+
+function parse(id) {
+  const s = $(id).value.trim();
+  const a = s.split(",").map(x => Number(x.trim()));
+  if (!s || a.some(x => !Number.isInteger(x) || x <= 0)) throw Error("Enter positive whole numbers separated by commas.");
+  return a;
+}
+
+$("sample").onclick = () => {
+  $("blocks").value = "100, 500, 200, 300, 600";
+  $("processes").value = "212, 417, 112, 426";
+  $("method").value = "first";
+  $("run").click();
+};
+
+$("run").onclick = async () => {
+  const out = $("output");
+  try {
+    const blocks = parse("blocks"), processes = parse("processes"), method = $("method").value;
+    const r = await fetch("/api/memory", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({blocks, processes, method})});
+    const x = await r.json();
+    if (!r.ok) throw Error(x.error);
+
+    let h = `<h3>${NAMES[method]} results</h3><table><thead><tr><th>Process</th><th>Size</th><th>Block</th><th>Result</th><th>Left in block</th></tr></thead><tbody>` +
+      x.allocations.map(a => `<tr><td><b>${a.process}</b></td><td>${a.size}</td><td>${a.block === null ? "—" : "Block " + a.block}</td>` +
+        `<td class="${a.block === null ? "bad" : "ok"}">${a.status}</td><td>${a.remaining_in_block ?? "—"}</td></tr>`).join("") + "</tbody></table>";
+
+    h += `<h3>Memory layout</h3>` + x.remaining.map((free, i) => {
+      const segs = x.placements[i].map(p => `<div class="mem-seg p${(+p.process.slice(1) - 1) % 8}" style="flex:${p.size}" title="${p.process}: ${p.size}">${p.process}</div>`).join("");
+      return `<div class="mem-block"><div class="mem-head"><b>Block ${i + 1} · ${blocks[i]} units</b><span>${free} free</span></div>` +
+        `<div class="mem-bar">${segs}<div class="mem-free" style="flex:${free}"></div></div></div>`;
+    }).join("");
+
+    h += `<p><b>Total free:</b> ${x.total_free} units.`;
+    if (x.unallocated.length) h += ` <span class="bad">${x.unallocated.join(", ")} could not be placed.</span>` +
+      (x.fragmentation ? " Enough memory is free in total, but not in one block. This is external fragmentation." : "");
+    out.innerHTML = h + "</p>";
+  } catch (e) {
+    out.innerHTML = `<div class="error" role="alert" style="margin:0">${e.message}</div>`;
+  }
+};
+$("run").click();
+</script>
+</body>
+</html>

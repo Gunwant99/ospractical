@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Producer–Consumer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="hero">
+  <div>
+    <span class="eyebrow">OPERATING SYSTEMS • SYNCHRONIZATION</span>
+    <h1>Producer–Consumer <span>Queue</span></h1>
+    <p>In the exam system, bakers stand for students submitting answers, the shelf is the bounded submission queue, and customers are evaluation workers. A full queue blocks producers; an empty queue blocks consumers.</p>
+  </div>
+  <div class="hero-badge">LIVE<b>THREADS</b></div>
+</header>
+<main>
+  <section class="panel">
+    <div class="actions" style="align-items:center">
+      <button id="btn" class="run">Start</button>
+      <span id="conn" style="color:var(--muted);font-size:13px"></span>
+    </div>
+    <div class="sliders">
+      <label>Baker (producer) speed: <b id="bakeVal">1.5</b> s per item<input type="range" id="bake" min="0.5" max="3" step="0.1" value="1.5"></label>
+      <label>Customer (consumer) speed: <b id="buyVal">1.5</b> s per item<input type="range" id="buy" min="0.5" max="3" step="0.1" value="1.5"></label>
+    </div>
+    <p style="margin:12px 0 0">Make the baker slow and customers wait. Make the customer slow and the shelf fills up so bakers wait. A lock lets only one thread touch the shelf at a time.</p>
+  </section>
+
+  <div class="pc-layout">
+    <section class="panel"><h3>👨‍🍳 Bakers (producers)</h3><div id="bakers"></div></section>
+    <section class="panel">
+      <h3 style="text-align:center">Shelf (bounded buffer)</h3>
+      <div class="shelf" id="shelf"></div>
+      <div class="pc-info" id="info"></div>
+      <div class="counts">
+        <div><b id="freeN">5</b>Free (empty semaphore)</div>
+        <div><b id="breadN">0</b>Ready (full semaphore)</div>
+        <div><b id="bakedN">0</b>Produced</div>
+        <div><b id="soldN">0</b>Consumed</div>
+      </div>
+    </section>
+    <section class="panel"><h3>🛍️ Customers (consumers)</h3><div id="customers"></div></section>
+  </div>
+
+  <section class="panel"><h3 style="margin-top:0">Event log</h3><div class="log" id="log"></div></section>
+</main>
+<footer>Producer–Consumer | semaphores: empty, full + mutex lock</footer>
+<script src="/static/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let running = false, firstTime = true, busy = false;
+const WORDS = {baking: "🍞 Baking…", shopping: "🛒 Deciding what to buy…"};
+
+function esc(t) { return String(t).replace(/[&<>]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c])); }
+
+function card(name, state) {
+  const waiting = state === "waiting";
+  const text = waiting ? (name.startsWith("Baker") ? "⏳ Shelf is full, waiting" : "⏳ Shelf is empty, waiting") : (WORDS[state] || "Idle");
+  return `<div class="person ${waiting ? "wait" : ""}"><b>${esc(name)}</b><small>${text}</small></div>`;
+}
+
+async function update() {
+  if (busy) return;
+  busy = true;
+  try {
+    const s = await (await fetch("/api/state")).json();
+    running = s.running;
+    $("conn").textContent = "";
+    $("btn").textContent = running ? "Pause" : "Start";
+    if (firstTime) {
+      firstTime = false;
+      $("bake").value = s.bake_time; $("bakeVal").textContent = s.bake_time;
+      $("buy").value = s.buy_time; $("buyVal").textContent = s.buy_time;
+    }
+    $("shelf").innerHTML = Array.from({length: s.size}, (_, i) => `<div class="slot ${i < s.on_shelf ? "full" : ""}">${i < s.on_shelf ? "🍞" : ""}</div>`).join("");
+    $("freeN").textContent = s.size - s.on_shelf;
+    $("breadN").textContent = s.on_shelf;
+    $("bakedN").textContent = s.baked;
+    $("soldN").textContent = s.sold;
+    $("info").textContent = !s.running ? "Press Start to begin"
+      : s.on_shelf === s.size ? "🛑 Shelf is FULL: bakers must wait"
+      : s.on_shelf === 0 ? "🛑 Shelf is EMPTY: customers must wait" : "✅ Running smoothly";
+    const names = Object.keys(s.status).sort();
+    $("bakers").innerHTML = names.filter(n => n.startsWith("Baker")).map(n => card(n, s.status[n])).join("") || "<small style='color:var(--muted)'>Press Start</small>";
+    $("customers").innerHTML = names.filter(n => n.startsWith("Customer")).map(n => card(n, s.status[n])).join("") || "<small style='color:var(--muted)'>Press Start</small>";
+    $("log").innerHTML = s.messages.map(m => `<div>${esc(m)}</div>`).join("") || "<div>No events yet.</div>";
+  } catch (e) {
+    $("conn").textContent = "Cannot reach the server. Run: python app.py";
+  }
+  busy = false;
+}
+
+const send = (url, data) => fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(data)});
+$("btn").onclick = async () => { await send("/api/running", {running: !running}); update(); };
+$("bake").oninput = e => $("bakeVal").textContent = e.target.value;
+$("bake").onchange = e => send("/api/speed", {bake_time: e.target.value});
+$("buy").oninput = e => $("buyVal").textContent = e.target.value;
+$("buy").onchange = e => send("/api/speed", {buy_time: e.target.value});
+update();
+setInterval(update, 300);
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banker's Algorithm</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="hero">
+  <div>
+    <span class="eyebrow">OPERATING SYSTEMS • DEADLOCK AVOIDANCE</span>
+    <h1>Banker's <span>Algorithm</span></h1>
+    <p>Model exam tasks that request resources such as database connections, evaluation workers and report services. The system is safe if every process can finish in some order.</p>
+  </div>
+  <div class="hero-badge">SAFE<b>STATE</b></div>
+</header>
+<main>
+  <section class="panel">
+    <div class="section-title"><div><span class="eyebrow">INPUT</span><h2>Configure the system</h2></div></div>
+    <div class="field-row">
+      <label>Processes (1–8)<input id="n" type="number" min="1" max="8" value="5"></label>
+      <label>Resource types (1–4)<input id="m" type="number" min="1" max="4" value="3"></label>
+      <button id="build" class="secondary">Build empty tables</button>
+      <button id="sample" class="secondary">Load sample</button>
+    </div>
+    <div id="inputs" class="table-wrap"></div>
+    <div style="margin-top:18px"><button id="run" class="run">Check safe state</button></div>
+    <div id="output" class="result"><span style="color:var(--muted)">Fill in the tables and press “Check safe state”.</span></div>
+  </section>
+  <section class="panel">
+    <div class="section-title"><div><span class="eyebrow">CONCEPT</span><h2>How to read the result</h2></div></div>
+    <p><b>Need = Maximum − Allocation.</b> A process can run when its Need is at most the Work vector (Available at first). When it finishes it returns its Allocation, so Work grows. If every process finishes this way, the order is a <b>safe sequence</b>.</p>
+  </section>
+</main>
+<footer>Banker's Algorithm | Need = Max − Allocation</footer>
+<script src="/static/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let n = 5, m = 3;
+
+function table(title, key, rows, cols, vals) {
+  let h = `<h3>${title}</h3><table class="matrix-table"><thead><tr><th>${key === "V" ? "" : "Process"}</th>` +
+    Array.from({length: cols}, (_, j) => `<th>R${j + 1}</th>`).join("") + "</tr></thead><tbody>";
+  for (let i = 0; i < rows; i++) {
+    h += `<tr><th>${key === "V" ? "Available" : "P" + (i + 1)}</th>`;
+    for (let j = 0; j < cols; j++)
+      h += `<td><input class="matrix-input" type="number" min="0" aria-label="${title} ${key === "V" ? "" : "P" + (i + 1)} R${j + 1}" data-k="${key}" data-i="${i}" data-j="${j}" value="${vals[i]?.[j] ?? 0}"></td>`;
+    h += "</tr>";
+  }
+  return h + "</tbody></table>";
+}
+
+function build(sample) {
+  n = Math.max(1, Math.min(8, +$("n").value || 5));
+  m = Math.max(1, Math.min(4, +$("m").value || 3));
+  $("n").value = n; $("m").value = m;
+  const A = [[0,1,0],[2,0,0],[3,0,2],[2,1,1],[0,0,2]],
+        M = [[7,5,3],[3,2,2],[9,0,2],[2,2,2],[4,3,3]], V = [[3,3,2]];
+  const pick = d => sample ? d : [];
+  $("inputs").innerHTML = table("Allocation", "A", n, m, pick(A)) + table("Maximum", "M", n, m, pick(M)) + table("Available", "V", 1, m, pick(V));
+}
+
+function read() {
+  const o = {A: Array.from({length: n}, () => Array(m).fill(0)), M: Array.from({length: n}, () => Array(m).fill(0)), V: Array(m).fill(0)};
+  document.querySelectorAll("[data-k]").forEach(x => {
+    const v = Number(x.value);
+    if (x.value === "" || !Number.isInteger(v) || v < 0) throw Error("Use whole numbers of 0 or more in every cell.");
+    const i = +x.dataset.i, j = +x.dataset.j;
+    if (x.dataset.k === "V") o.V[j] = v; else o[x.dataset.k][i][j] = v;
+  });
+  return o;
+}
+
+const row = (name, v) => `<tr><th>${name}</th>${v.map(x => `<td>${x}</td>`).join("")}</tr>`;
+const head = c => `<tr><th></th>${Array.from({length: c}, (_, j) => `<th>R${j + 1}</th>`).join("")}</tr>`;
+
+$("build").onclick = () => build(false);
+$("sample").onclick = () => build(true);
+$("run").onclick = async () => {
+  const out = $("output");
+  try {
+    const d = read();
+    const r = await fetch("/api/bankers", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({allocation: d.A, maximum: d.M, available: d.V})});
+    const x = await r.json();
+    if (!r.ok) throw Error(x.error);
+    let h = `<span class="verdict ${x.safe ? "safe" : "unsafe"}">${x.safe ? "SAFE STATE" : "UNSAFE STATE"}</span>`;
+    if (x.safe) h += `<div class="seq">${x.sequence.map(p => `<span class="chip">${p}</span>`).join('<span class="arrow">→</span>')}</div>`;
+    else h += `<p>These processes cannot be confirmed to finish: <b>${x.unfinished.join(", ")}</b>. Deadlock is possible.</p>`;
+    h += `<h3>Need matrix</h3><table class="matrix-table"><thead>${head(m)}</thead><tbody>${x.need.map((r, i) => row("P" + (i + 1), r)).join("")}</tbody></table>`;
+    h += `<h3>Step by step</h3><table><thead><tr><th>Step</th><th>Run</th><th>Work before</th><th>Work after</th></tr></thead><tbody>` +
+      x.steps.map((s, i) => `<tr><td>${i + 1}</td><td><b>${s.process}</b></td><td>[${s.work_before.join(", ")}]</td><td>[${s.work_after.join(", ")}]</td></tr>`).join("") + "</tbody></table>";
+    out.innerHTML = h;
+  } catch (e) {
+    out.innerHTML = `<div class="error" role="alert" style="margin:0">${e.message}</div>`;
+  }
+};
+build(true);
+</script>
+</body>
+</html>
